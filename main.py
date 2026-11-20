@@ -1,36 +1,68 @@
-import os, uuid, shutil, subprocess, tempfile, threading
+import os, re, uuid, shutil, subprocess, tempfile, threading, time
 from pathlib import Path
 import httpx
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 DG_KEY = os.environ["DEEPGRAM_API_KEY"]
 DG_URL = "https://api.deepgram.com/v1/listen"
 PARAMS = {"model": "nova-3", "smart_format": "true", "punctuate": "true",
           "utterances": "true", "detect_language": "true"}
+SELF_URL = os.environ.get("RENDER_EXTERNAL_URL")
+ACTIVE = {"queued", "downloading", "preparing", "transcribing"}
 WORK = Path(tempfile.gettempdir()) / "scribely"
 WORK.mkdir(exist_ok=True)
 jobs = {}
 app = FastAPI()
 
 
+def keepalive():
+    while True:
+        time.sleep(240)
+        if SELF_URL and any(j["status"] in ACTIVE for j in list(jobs.values())):
+            try:
+                httpx.get(SELF_URL + "/health", timeout=20)
+            except Exception:
+                pass
+
+
+threading.Thread(target=keepalive, daemon=True).start()
+
+
+def set_status(job_id, status):
+    jobs[job_id]["status"] = status
+    print(f"[{job_id}] {status}", flush=True)
+
+
+def download(job, d, url):
+    p = subprocess.Popen(
+        ["yt-dlp", "-f", "bestaudio/worst", "-N", "8", "--no-playlist", "--newline",
+         "-o", str(d / "src.%(ext)s"), url],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    tail = []
+    for line in p.stdout:
+        tail = (tail + [line.strip()])[-6:]
+        m = re.search(r"\[download\]\s+([\d.]+)%", line)
+        if m:
+            job["progress"] = float(m.group(1))
+    if p.wait() != 0:
+        raise RuntimeError(" | ".join(tail)[-300:] or "Download failed.")
+    return max(d.glob("src.*"), key=lambda f: f.stat().st_size)
+
+
 def run(job_id, src, url):
     job, d = jobs[job_id], WORK / job_id
     try:
         if url:
-            job["status"] = "downloading"
-            subprocess.run(["yt-dlp", "-f", "bestaudio/worst", "--no-playlist",
-                            "-o", str(d / "src.%(ext)s"), url],
-                           check=True, capture_output=True, timeout=3600)
-            src = next(d.glob("src.*"))
-        # Mono 16 kHz MP3 keeps a 10-hour file near 300 MB and drops video tracks.
-        job["status"] = "preparing"
+            set_status(job_id, "downloading")
+            src = download(job, d, url)
+        set_status(job_id, "preparing")
         audio = d / "audio.mp3"
         subprocess.run(["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "1",
                         "-ar", "16000", "-b:a", "48k", str(audio)],
-                       check=True, capture_output=True)
-        job["status"] = "transcribing"
-        with open(audio, "rb") as f, httpx.Client(timeout=httpx.Timeout(3600.0)) as c:
+                       check=True, capture_output=True, timeout=7200)
+        set_status(job_id, "transcribing")
+        with open(audio, "rb") as f, httpx.Client(timeout=httpx.Timeout(7200.0)) as c:
             r = c.post(DG_URL, params=PARAMS,
                        headers={"Authorization": f"Token {DG_KEY}", "Content-Type": "audio/mpeg"},
                        content=iter(lambda: f.read(1 << 20), b""))
@@ -39,11 +71,13 @@ def run(job_id, src, url):
         job["language"] = res["channels"][0].get("detected_language")
         job["segments"] = [{"start": u["start"], "end": u["end"], "text": u["transcript"]}
                            for u in res.get("utterances", [])]
-        job["status"] = "done"
+        set_status(job_id, "done")
     except subprocess.CalledProcessError as e:
         job.update(status="error", error=(e.stderr or b"").decode()[-300:] or "Could not read that media.")
+        print(f"[{job_id}] ERROR {job['error']}", flush=True)
     except Exception as e:
         job.update(status="error", error=str(e)[:300])
+        print(f"[{job_id}] ERROR {job['error']}", flush=True)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
@@ -63,7 +97,7 @@ async def create_job(file: UploadFile | None = File(None), url: str | None = For
         with open(src, "wb") as out:
             while chunk := await file.read(1 << 20):
                 out.write(chunk)
-    jobs[job_id] = {"status": "queued", "name": file.filename if file else url}
+    jobs[job_id] = {"status": "queued", "name": file.filename if file else url, "progress": 0}
     threading.Thread(target=run, args=(job_id, src, None if file else url), daemon=True).start()
     return {"id": job_id}
 
@@ -71,9 +105,17 @@ async def create_job(file: UploadFile | None = File(None), url: str | None = For
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str):
     if job_id not in jobs:
-        raise HTTPException(404, "Job not found. It may have been cleared after a restart.")
+        raise HTTPException(404, "Job not found. The server may have restarted.")
     return jobs[job_id]
 
 
-if Path("static").exists():
-    app.mount("/", StaticFiles(directory="static", html=True), name="static")
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.get("/")
+def home():
+    if Path("index.html").exists():
+        return FileResponse("index.html")
+    return {"ok": True}
