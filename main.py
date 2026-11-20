@@ -19,7 +19,7 @@ def run(job_id, src, url):
     try:
         if url:
             job["status"] = "downloading"
-            subprocess.run(["yt-dlp", "-f", "bestaudio", "--no-playlist",
+            subprocess.run(["yt-dlp", "-f", "bestaudio/worst", "--no-playlist",
                             "-o", str(d / "src.%(ext)s"), url],
                            check=True, capture_output=True, timeout=3600)
             src = next(d.glob("src.*"))
