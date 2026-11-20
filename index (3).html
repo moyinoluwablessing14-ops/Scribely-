@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scribely – audio to text with timestamps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#FBF3E4;--card:#FFFBF2;--ink:#2B2118;--mute:#7A6A5A;--line:#E8D9BF;--orange:#F26B1D;--orange-ink:#fff;--teal:#0F5C58;--teal-soft:#D7ECE8;--sand:#F3E4C8;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1C1712;--card:#251F18;--ink:#F6EBDA;--mute:#B7A691;--line:#3A3126;--orange:#FF8440;--orange-ink:#1C1712;--teal:#7FD6CD;--teal-soft:#143B38;--sand:#2E261D}}
+:root[data-theme="dark"]{--bg:#1C1712;--card:#251F18;--ink:#F6EBDA;--mute:#B7A691;--line:#3A3126;--orange:#FF8440;--orange-ink:#1C1712;--teal:#7FD6CD;--teal-soft:#143B38;--sand:#2E261D}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Bricolage Grotesque",system-ui,sans-serif}
+.wrap{max-width:820px;margin:0 auto;padding:28px 18px 60px}
+.brand{font-weight:800;font-size:20px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.dot{width:14px;height:14px;border-radius:50%;background:var(--orange);box-shadow:8px 0 0 -2px var(--teal)}
+h1{font-size:clamp(34px,8vw,56px);line-height:1.04;letter-spacing:-.03em;font-weight:800;margin:36px 0 12px;max-width:14em}
+.sub{color:var(--mute);max-width:34em;margin:0 0 26px}
+.drop{border:2px dashed var(--orange);background:var(--card);border-radius:22px;padding:34px 20px;text-align:center;cursor:pointer;transition:background .15s}
+.drop.over,.drop:hover{background:var(--sand)}
+.drop b{display:block;font-size:20px}
+.drop span{color:var(--mute);font-size:14px}
+.btn{font:inherit;font-weight:700;border:0;border-radius:999px;padding:12px 22px;cursor:pointer;background:var(--orange);color:var(--orange-ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line);padding:8px 14px;font-weight:500;font-size:14px}
+.btn:focus-visible,.tab:focus-visible,.drop:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+.link{display:flex;gap:8px;margin-top:12px}.link input{flex:1;min-width:0;font:inherit;padding:12px 16px;border:1.5px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink)}.link input:focus-visible{outline:3px solid var(--teal);outline-offset:2px}.err{color:#B3361B;font-size:14px;margin-top:8px}
+.file{display:none;margin-top:14px;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px}
+.file.on{display:flex}
+.fn{font-weight:700;word-break:break-all}
+.fm{color:var(--mute);font-size:14px;font-family:"IBM Plex Mono",monospace}
+.bar{display:none;height:8px;border-radius:8px;background:var(--line);margin-top:16px;overflow:hidden}
+.bar.on{display:block}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--orange),var(--teal));transition:width .2s}
+.note{margin-top:14px;font-size:13px;color:var(--mute);background:var(--teal-soft);border-radius:12px;padding:10px 14px}
+#out{display:none;margin-top:34px}
+#out.on{display:block}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-bottom:14px}
+.tabs{display:none}
+.tab{font:inherit;font-weight:500;border:1.5px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;padding:7px 15px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--teal);border-color:var(--teal);color:var(--bg)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 18px}
+.seg{display:grid;grid-template-columns:auto 1fr;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.seg:last-child{border-bottom:0}
+.ts{font:500 13px "IBM Plex Mono",monospace;color:var(--teal);background:var(--teal-soft);border-radius:8px;padding:3px 8px;height:fit-content}
+.hide .ts{display:none}
+.hide .seg{grid-template-columns:1fr}
+.spk{font-weight:700;margin-right:6px}
+.actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="dot"></span>Scribely</div>
+  <h1>Drop in a recording. Get text with timestamps.</h1>
+  <p class="sub">Upload a file or paste a link. Get the full transcript of up to 10 hours of audio, with a timestamp on every line.</p>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose an audio or video file">
+    <b>Drop a file here, or tap to choose</b>
+    <span>MP3, WAV, M4A, MP4 and more · up to 10 hours / 5 GB</span>
+    <input id="pick" type="file" accept="audio/*,video/*" hidden>
+  </div>
+
+  <div class="link"><input id="url" type="url" inputmode="url" placeholder="Or paste a YouTube, Twitch or Kick link" aria-label="Video link"><button class="btn ghost" id="useLink">Use link</button></div><div class="err" id="err" role="alert"></div>
+  <div class="file" id="file">
+    <div><div class="fn" id="fn"></div><div class="fm" id="fm"></div></div>
+    <button class="btn" id="go">Transcribe</button>
+  </div>
+  <div class="bar" id="bar"><i id="fill"></i></div>
+  <div class="note" id="st">Up to 10 hours. Long files take a while, so keep this page open.</div>
+
+  <section id="out" aria-live="polite">
+    <div class="tools">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <button class="btn ghost" id="tsBtn">Hide timestamps</button>
+    </div>
+    <div class="panel" id="panel"></div>
+    <div class="actions">
+      <button class="btn" id="copy">Copy transcript</button>
+      <button class="btn ghost" id="dlTxt">Download .txt</button>
+      <button class="btn ghost" id="dlSrt">Download .srt</button>
+      <button class="btn ghost" id="again">Transcribe another file</button>
+    </div>
+  </section>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const fmt=s=>{s=Math.floor(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return h+":"+String(m).padStart(2,"0")+":"+String(x).padStart(2,"0")};
+const srtT=s=>{const ms=Math.round(s*1000),h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),x=Math.floor(ms%60000/1000),r=ms%1000,p=(n,l=2)=>String(n).padStart(l,"0");return p(h)+":"+p(m)+":"+p(x)+","+p(r,3)};
+const LABEL={queued:"Waiting to start…",downloading:"Downloading the video…",preparing:"Preparing the audio…",transcribing:"Transcribing. Long files can take several minutes…"};
+let file=null,link="",showTs=true,segs=[],busy=false;
+const note=t=>{$("st").textContent=t};
+function setSource(name,meta){$("fn").textContent=name;$("fm").textContent=meta;$("file").classList.add("on");$("out").classList.remove("on");$("err").textContent=""}
+function pick(f){if(!f)return;file=f;link="";setSource(f.name,(f.size/1048576).toFixed(1)+" MB")}
+const drop=$("drop"),inp=$("pick");
+drop.onclick=()=>inp.click();
+drop.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click()}};
+inp.onchange=()=>pick(inp.files[0]);
+["dragover","dragenter"].forEach(n=>drop.addEventListener(n,e=>{e.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(n=>drop.addEventListener(n,e=>{e.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",e=>pick(e.dataTransfer.files[0]));
+$("useLink").onclick=()=>{$("err").textContent="";try{const x=new URL($("url").value.trim());if(!/^https?:$/.test(x.protocol))throw 0;link=x.href;file=null;setSource(x.hostname.replace(/^www\./,"")+x.pathname.slice(0,40),"Link")}catch(e){$("err").textContent="Paste a full link that starts with https://"}};
+function fail(m){busy=false;$("go").disabled=false;$("bar").classList.remove("on");note("Something went wrong.");$("err").textContent=m;try{localStorage.removeItem("scribely_job")}catch(e){}}
+async function poll(id){
+  $("bar").classList.add("on");$("fill").style.width="100%";
+  for(;;){
+    let j;
+    try{const r=await fetch("/api/jobs/"+id);if(r.status===404)return fail("The server restarted and lost this job. Please start it again.");j=await r.json()}
+    catch(e){note("Reconnecting…");await new Promise(r=>setTimeout(r,4000));continue}
+    if(j.status==="done"){segs=j.segments||[];busy=false;$("go").disabled=false;$("bar").classList.remove("on");note("Done"+(j.language?" · detected language: "+j.language:""));try{localStorage.removeItem("scribely_job")}catch(e){}return show()}
+    if(j.status==="error")return fail(j.error||"Transcription failed.");
+    note((LABEL[j.status]||j.status)+(j.status==="downloading"&&j.progress?" "+Math.round(j.progress)+"%":""));
+    await new Promise(r=>setTimeout(r,3000));
+  }
+}
+$("go").onclick=async()=>{
+  if(busy)return;
+  if(!file&&!link){$("err").textContent="Choose a file or paste a link first.";return}
+  busy=true;$("go").disabled=true;$("err").textContent="";$("out").classList.remove("on");note("Uploading…");
+  try{
+    const fd=new FormData();if(file)fd.append("file",file);else fd.append("url",link);
+    const r=await fetch("/api/jobs",{method:"POST",body:fd});
+    if(!r.ok){let m="Could not start the job.";try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}
+    const {id}=await r.json();
+    try{localStorage.setItem("scribely_job",id)}catch(e){}
+    await poll(id);
+  }catch(e){fail(e.message)}
+};
+function show(){
+  $("out").classList.add("on");
+  $("panel").className="panel"+(showTs?"":" hide");
+  $("panel").innerHTML=segs.length?"":"<p style='padding:14px 0;margin:0'>No speech was found in this file.</p>";
+  segs.forEach(s=>{const d=document.createElement("div");d.className="seg";const t=document.createElement("span");t.className="ts";t.textContent=fmt(s.start);const p=document.createElement("p");p.style.margin="0";p.textContent=s.text;d.append(t,p);$("panel").append(d)});
+  $("tsBtn").textContent=showTs?"Hide timestamps":"Show timestamps";
+}
+$("tsBtn").onclick=()=>{showTs=!showTs;show()};
+const txt=()=>segs.map(s=>(showTs?"["+fmt(s.start)+"] ":"")+s.text).join("\n");
+$("copy").onclick=async()=>{try{await navigator.clipboard.writeText(txt());$("copy").textContent="Copied"}catch(e){$("copy").textContent="Copy failed"}setTimeout(()=>$("copy").textContent="Copy transcript",1500)};
+function save(name,body){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([body],{type:"text/plain"}));a.download=name;a.click()}
+$("dlTxt").onclick=()=>save("transcript.txt",txt());
+$("dlSrt").onclick=()=>save("transcript.srt",segs.map((s,i)=>(i+1)+"\n"+srtT(s.start)+" --> "+srtT(s.end)+"\n"+s.text+"\n").join("\n"));
+$("again").onclick=()=>{$("out").classList.remove("on");$("file").classList.remove("on");inp.value="";file=null;link="";note("Up to 10 hours. Long files take a while, so keep this page open.");scrollTo({top:0,behavior:"smooth"})};
+// Resume a job if the person left the page and came back.
+try{const id=localStorage.getItem("scribely_job");if(id){busy=true;$("go").disabled=true;setSource("Resuming your last job…","");poll(id)}}catch(e){}
+</script>
+</body>
+</html>
